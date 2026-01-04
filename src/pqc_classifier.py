@@ -14,9 +14,12 @@ def create_qubits(n):
     return cirq.LineQubit.range(n)
 
 def encoding_circuit(qubits, x):
+    # you say rx, ry, rz, but the code does rz, ry, rz?
+    # I prefer rx, ry, rz, but the tutorial code has rz, ry, rz too
+    # also, rotating like this is equivilant to rotation along a diagonal, why use the extra gates for that?
     """Data encoding layer: apply Rx, Ry, Rz rotations based on input features x"""
     for i, q in enumerate(qubits):
-        yield cirq.rz(x[i])(q)
+        yield cirq.rz(x[i])(q)        # since we start at |0>, which is on the z-axis this rotation doesn't do anything
         yield cirq.ry(x[i])(q)
         yield cirq.rz(x[i])(q)
 
@@ -25,6 +28,7 @@ def variational_circuit(qubits, theta, n_layers):
     n_qubits = len(qubits)
     for l in range(n_layers):
         for i, q in enumerate(qubits):
+            # we only allow rotaion along one axis? this might limit its learning capacity
             yield cirq.ry(theta[l * n_qubits + i])(q)
         for i in range(n_qubits - 1):
             yield cirq.CZ(qubits[i], qubits[i + 1])
@@ -42,8 +46,8 @@ def expectation_z_n(state_vector):
     exp = 0.0
     #n_qubits = int(np.log2(len(state_vector)))
     for i, amp in enumerate(state_vector):
-        parity = (-1) ** (bin(i).count("1"))
-        exp += parity * np.abs(amp) ** 2
+        parity = (-1) ** (bin(i).count("1"))                        # this accounts to assigning 1 or -1 based on the qbit number to each qbit,
+        exp += parity * np.abs(amp) ** 2                            # I don't know if that's intentional, but it seems odd to me
     return exp
 
 def forward(x, theta, qubits, simulator, n_layers=3):
