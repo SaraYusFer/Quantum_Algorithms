@@ -5,6 +5,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 from scipy.optimize import minimize
 import matplotlib.pyplot as plt
+from sklearn.model_selection import KFold
 
 
 ########### Quantum circuit setup ###########
@@ -91,6 +92,40 @@ def accuracy(X, y, theta, qubits, simulator, n_layers=3):
     preds = np.array([classifier(x, theta, qubits, simulator, n_layers) for x in X])
     return np.mean(preds == y)
 
+# Cross validation (explicitly required by assignment)
+def cross_validate_pqc(X, y, qubits, simulator, n_layers=3, lr=0.1, epochs=20, k=5, seed=42):
+    """
+    Perform k-fold cross-validation for the PQC classifier.
+    Returns mean and std of accuracy across folds.
+    """
+    kf = KFold(n_splits=k, shuffle=True, random_state=seed)
+    accuracies = []
+
+    for fold, (train_idx, val_idx) in enumerate(kf.split(X)):
+        print(f"\nFold {fold + 1}/{k}")
+
+        X_train, X_val = X[train_idx], X[val_idx]
+        y_train, y_val = y[train_idx], y[val_idx]
+
+        theta, _ = train(
+            X_train, y_train,
+            qubits, simulator,
+            n_layers=n_layers,
+            lr=lr,
+            epochs=epochs
+        )
+
+        acc = accuracy(
+            X_val, y_val,
+            theta, qubits, simulator,
+            n_layers=n_layers
+        )
+
+        print(f"Validation accuracy: {acc:.3f}")
+        accuracies.append(acc)
+
+    return np.mean(accuracies), np.std(accuracies)
+
 ########### Visualization ###########
 
 def plot_dataset(X, y, title="Dataset", ax=None):
@@ -161,6 +196,10 @@ def main():
 
     # Plot training loss
     plot_training_loss(loss_history)
+
+    # Cross validation
+    mean_acc, std_acc = cross_validate_pqc(X_train, y_train, qubits, simulator, n_layers=n_layers, lr=0.1, epochs=15, k=3)
+    print("Cross validation results (mean accuracy, std.deviation):", mean_acc, std_acc)
 
     # Evaluation
     test_acc = accuracy(X_test, y_test, theta, qubits, simulator, n_layers=n_layers)
