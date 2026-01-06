@@ -15,7 +15,7 @@ def create_qubits(n):
     return cirq.LineQubit.range(n)
 
 def encoding_circuit(qubits, x):
-    # also, rotating like this is equivilant to rotation along a diagonal, why use the extra gates for that?
+    # Rotating like this is equivalent to rotation along a diagonal, why use the extra gates for that?
     # can't be simplified after entanglement, only before --> better to keep all rotations
     """Data encoding layer: apply Rz, Ry, Rx rotations based on input features x"""
     for i, q in enumerate(qubits):
