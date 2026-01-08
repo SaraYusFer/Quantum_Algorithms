@@ -5,6 +5,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 from scipy.optimize import minimize
 import matplotlib.pyplot as plt
+from sklearn.model_selection import KFold
 
 
 ########### Quantum circuit setup ###########
@@ -14,12 +15,11 @@ def create_qubits(n):
     return cirq.LineQubit.range(n)
 
 def encoding_circuit(qubits, x):
-    # you say rx, ry, rz, but the code does rz, ry, rz?
-    # I prefer rx, ry, rz, but the tutorial code has rz, ry, rz too
-    # also, rotating like this is equivilant to rotation along a diagonal, why use the extra gates for that?
-    """Data encoding layer: apply Rx, Ry, Rz rotations based on input features x"""
+    # Rotating like this is equivalent to rotation along a diagonal, why use the extra gates for that?
+    # can't be simplified after entanglement, only before --> better to keep all rotations
+    """Data encoding layer: apply Rz, Ry, Rx rotations based on input features x"""
     for i, q in enumerate(qubits):
-        yield cirq.rz(x[i])(q)        # since we start at |0>, which is on the z-axis this rotation doesn't do anything
+        yield cirq.rz(x[i])(q)        # since we start at |0>, which is on the z-axis this rotation doesn't do anything --> redundant at depth 1 but not after depth 2
         yield cirq.ry(x[i])(q)
         yield cirq.rz(x[i])(q)
 
@@ -29,6 +29,8 @@ def variational_circuit(qubits, theta, n_layers):
     for l in range(n_layers):
         for i, q in enumerate(qubits):
             # we only allow rotaion along one axis? this might limit its learning capacity
+            # yes but, single axis rotation: reduces parameter count --> stabilizes training, acts as regularizer
+            # from the literature: Havlíček et al. (2019): Expressivity comes primarily from the feature map + entanglement, The variational circuit does not need full SU(2) freedom per qubit
             yield cirq.ry(theta[l * n_qubits + i])(q)
         for i in range(n_qubits - 1):
             yield cirq.CZ(qubits[i], qubits[i + 1])
@@ -47,7 +49,7 @@ def expectation_z_n(state_vector):
     #n_qubits = int(np.log2(len(state_vector)))
     for i, amp in enumerate(state_vector):
         parity = (-1) ** (bin(i).count("1"))                        # this accounts to assigning 1 or -1 based on the qbit number to each qbit,
-        exp += parity * np.abs(amp) ** 2                            # I don't know if that's intentional, but it seems odd to me
+        exp += parity * np.abs(amp) ** 2                            # intentional: The parity factor corresponds to the eigenvalues of the observable Z⊗n
     return exp
 
 def forward(x, theta, qubits, simulator, n_layers=3):
@@ -89,6 +91,40 @@ def train(X, y, qubits, simulator, n_layers=3, lr=0.1, epochs=30):
 def accuracy(X, y, theta, qubits, simulator, n_layers=3):
     preds = np.array([classifier(x, theta, qubits, simulator, n_layers) for x in X])
     return np.mean(preds == y)
+
+# Cross validation (explicitly required by assignment)
+def cross_validate_pqc(X, y, qubits, simulator, n_layers=3, lr=0.1, epochs=20, k=5, seed=42):
+    """
+    Perform k-fold cross-validation for the PQC classifier.
+    Returns mean and std of accuracy across folds.
+    """
+    kf = KFold(n_splits=k, shuffle=True, random_state=seed)
+    accuracies = []
+
+    for fold, (train_idx, val_idx) in enumerate(kf.split(X)):
+        print(f"\nFold {fold + 1}/{k}")
+
+        X_train, X_val = X[train_idx], X[val_idx]
+        y_train, y_val = y[train_idx], y[val_idx]
+
+        theta, _ = train(
+            X_train, y_train,
+            qubits, simulator,
+            n_layers=n_layers,
+            lr=lr,
+            epochs=epochs
+        )
+
+        acc = accuracy(
+            X_val, y_val,
+            theta, qubits, simulator,
+            n_layers=n_layers
+        )
+
+        print(f"Validation accuracy: {acc:.3f}")
+        accuracies.append(acc)
+
+    return np.mean(accuracies), np.std(accuracies)
 
 ########### Visualization ###########
 
@@ -142,7 +178,7 @@ def plot_training_loss(losses):
 def main():
     # Dataset
     X, y = make_moons(n_samples=200, noise=0.1)
-    y = 2 * y - 1
+    y = 2 * y - 1 # from (0,1) to (-1,1)
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.5, random_state=42)
 
@@ -160,6 +196,10 @@ def main():
 
     # Plot training loss
     plot_training_loss(loss_history)
+
+    # Cross validation
+    mean_acc, std_acc = cross_validate_pqc(X_train, y_train, qubits, simulator, n_layers=n_layers, lr=0.1, epochs=15, k=3)
+    print("Cross validation results (mean accuracy, std.deviation):", mean_acc, std_acc)
 
     # Evaluation
     test_acc = accuracy(X_test, y_test, theta, qubits, simulator, n_layers=n_layers)
