@@ -13,23 +13,30 @@ class TrainableCircuit(tf.keras.Model):
     return self.layer(xs)
 
 class TrainableCircuitLayer(tf.keras.layers.Layer):
+  '''
+    Class implementing a layer that can learn an quantum curcuit
+  '''
   def __init__(self, n_qbits, n_layers, trainable=True, seed=None, scale_inputs=True):
     super().__init__()
     self.n_qbits, self.n_layers, self.scale_inputs = n_qbits, n_layers, scale_inputs
+    # set up the qubit grit
     self.qbits = cirq.GridQubit.rect(1, self.n_qbits)
     self.circuit = cirq.Circuit()
               # parameters
     self.theta_symbols = [[sympy.symbols(f'theta({layer}_{qbit_nr}_0:3)') for qbit_nr in range(self.n_qbits)] for layer in range(self.n_layers)]
     self.theta_symbols = np.asarray(self.theta_symbols).reshape((self.n_layers, self.n_qbits, 3))
-
+    # inputs are given by changing parameters of gates, so we need parameters for the input too
     self.input_symbols = np.array(sympy.symbols(f'x(0:{self.n_qbits})'))
 
-    # as per the exercise.
+    # first get U_enc(x)|0>, encoding the input values
     self.circuit += self.encoding_layer(self.qbits, self.input_symbols)
     for symbols in self.theta_symbols:
+      # entangle the qubits
       self.circuit += self.entangle_layer(self.qbits)
+      # aply an learnable unitary to each qubit
       self.circuit += self.trainable_layer(self.qbits, symbols)
 
+    # measurment is a projection on Z
     measurement = [cirq.Z(self.qbits[0])]
     for qbit in self.qbits[1:]:
       measurement[0] *= cirq.Z(qbit)
@@ -37,6 +44,7 @@ class TrainableCircuitLayer(tf.keras.layers.Layer):
     # find to what indexes parameters should map
     all_params = self.theta_symbols.flatten()
     all_params = np.append(all_params, self.input_symbols)
+    # store the order in which inputs should be given
     self.param_order = np.array([self.outputs.symbols.index(param) for param in all_params])
 
     # innit random theta values
@@ -44,15 +52,17 @@ class TrainableCircuitLayer(tf.keras.layers.Layer):
     self.thetas = self.add_weight((1, np.prod(self.theta_symbols.shape)), innit_theta, dtype=tf.float32,
         trainable=trainable, name="thetas")
     
+    # define weights for input scaling if that is set to true
     if self.scale_inputs:
       innit_alphas = tf.ones((1, self.n_qbits), dtype=tf.float32)
       self.alphas = self.add_weight((1, self.n_qbits), innit_alphas, dtype=tf.float32, trainable=trainable, name="alphas")
   
-  # can learn any unitary operation
+  # can learn any unitary operation on a single qubit
   def one_qbit_rotation(self, qbit, symbols):
     assert len(symbols) == 3
     return [cirq.rx(symbols[0])(qbit), cirq.ry(symbols[1])(qbit), cirq.rz(symbols[2])(qbit)]
   
+  # a layer of learnable unitaries on all qubits
   def trainable_layer(self, qbits, symbols):
     assert len(qbits) == symbols.shape[0] and symbols.shape[1] == 3
     layer = []
@@ -60,6 +70,7 @@ class TrainableCircuitLayer(tf.keras.layers.Layer):
       layer += self.one_qbit_rotation(qbit, symbol_set)
     return layer
 
+  # a layer to entangle all qubits
   def entangle_layer(self, qbits):
     assert len(qbits) > 0
     if len(qbits) == 1:
@@ -69,11 +80,13 @@ class TrainableCircuitLayer(tf.keras.layers.Layer):
       return [cirq.CZ(qbits[0], qbits[1])]
     return [cirq.CZ(qbits[i], qbits[(i + 1) % n]) for i in range(n)]
   
+  # the layer that encodes the input values into an unitary
   def encoding_layer(self, qbits, symbols):
     assert len(qbits) == len(symbols)
     # rx and ry are equally fine, we can't use rz as it won't move anything
     return [cirq.ry(symbol)(qbit) for qbit, symbol in zip(qbits, symbols)]
 
+  # the forward pass of the layer
   def call(self, xs):
     repeated_thetas = tf.tile(self.thetas, [xs.shape[0], 1])
     # scale the inputs if needed
@@ -84,5 +97,5 @@ class TrainableCircuitLayer(tf.keras.layers.Layer):
     # shuffle according to the order the ControlledPQC uses
     full_input = tf.gather(full_input, self.param_order, axis=1)
     empty_data = tfq.convert_to_tensor([cirq.Circuit()] * xs.shape[0])
-    res = self.outputs([empty_data, full_input])
-    return res
+    # the PCQ does the heavy lifting, this is <0|UZU|0>, so the projection of our learned circuit given some inputs onto Z
+    return self.outputs([empty_data, full_input])

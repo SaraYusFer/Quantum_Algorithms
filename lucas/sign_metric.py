@@ -1,6 +1,6 @@
 import tensorflow as tf
 
-class ParityMetric(tf.keras.Metric):
+class SignMetric(tf.keras.Metric):
   def __init__(self, name='parity_metric', **kwargs):
     super().__init__(dtype=tf.int32, name=name, **kwargs)
     self.same_side = self.add_variable(

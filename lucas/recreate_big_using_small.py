@@ -3,8 +3,10 @@ from trainable_circuit import TrainableCircuit
 import tensorflow as tf
 import numpy as np
 from matplotlib import pyplot as plt
-from pairty_metric import ParityMetric
+from sign_metric import SignMetric
+import os
 
+# generator for making the data
 def make_data(target_circuit, batchsize, seed):
   tf.random.set_seed(seed)
   n_qbits = target_circuit.layer.n_qbits
@@ -24,14 +26,15 @@ def recreate_circuit(n_qbits, n_layers, n_qbits_per_small, repetitions_per_small
               make_data_helper,              output_signature=(
                   tf.TensorSpec(shape=(batchsize, n_qbits), dtype=tf.float32),
                   tf.TensorSpec(shape=(batchsize, 1), dtype=tf.float32)))
-  
-  simulator.compile(optimizer = "adam", loss = tf.keras.losses.MeanSquaredError(), metrics=[ParityMetric])
+  # keep track of the accuracy (if the parity of the expected outputs are the same for both models)
+  simulator.compile(optimizer = "adam", loss = tf.keras.losses.MeanSquaredError(), metrics=[SignMetric])
   history = simulator.fit(dataset, epochs=epochs, steps_per_epoch=32)
-  print(simulator.layer.get_weights())
   return simulator, big_to_replicate, history
 
-def plot_performances(name='performance', n_qbits=2, qbits_per_small=1, n_layers=1, repetitions_set=[4],
+def plot_performances(name=None, n_qbits=2, qbits_per_small=1, n_layers=1, repetitions_set=[4],
                       batchsize=100, epochs=100, scale_inputs=False, seed=None):
+  if name is None:
+    name = f'{n_qbits}q_by_{qbits_per_small}q'
   fig, ax1 = plt.subplots()
   fig.suptitle(f'{n_qbits}-qubit model simulated by {qbits_per_small}-qubit models')
   ax1.set_xlabel('Epoch')
@@ -50,7 +53,9 @@ def plot_performances(name='performance', n_qbits=2, qbits_per_small=1, n_layers
     lines += ax1.plot(history.history['loss'], label=str(reps) + ' repetitions', color=c)
     ax_twin.plot(history.history['parity_metric'], color=c, linestyle='--')
   plt.legend(handles=lines, loc='lower left')
-  plt.savefig(name + '.png')
+  if not os.path.exists('results'):
+    os.makedirs('results')
+  plt.savefig(f'results/{name}.png')
 
 if __name__ == "__main__":
-  plot_performances(repetitions_set=[4], n_qbits=2, qbits_per_small=1, batchsize=50, epochs=100, seed=5562)
+  plot_performances(repetitions_set=[4, 8, 16, 32], n_qbits=3, n_layers=1, qbits_per_small=1, batchsize=50, epochs=100, seed=5562)
