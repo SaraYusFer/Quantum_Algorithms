@@ -31,31 +31,67 @@ def recreate_circuit(n_qbits, n_layers, n_qbits_per_small, repetitions_per_small
   history = simulator.fit(dataset, epochs=epochs, steps_per_epoch=32)
   return simulator, big_to_replicate, history
 
-def plot_performances(name=None, n_qbits=2, qbits_per_small=1, n_layers=1, repetitions_set=[4],
+def train_and_save(name=None, n_qbits=2, qbits_per_small=1, n_layers=1, repetition=4,
                       batchsize=100, epochs=100, scale_inputs=False, seed=None):
   if name is None:
-    name = f'{n_qbits}q_by_{qbits_per_small}q'
+    name = f'{n_qbits}q_by_{qbits_per_small}q/repetition_{repetition}'
+  _, _, history = recreate_circuit(n_qbits, n_layers, qbits_per_small, repetition,
+                                                  epochs, batchsize, int(seed), scale_inputs)
+  if not os.path.exists('models'):
+    os.makedirs('models')
+  if not os.path.exists('models/' + name):
+    os.makedirs('models/' + name)
+  with open(f'models/{name}/history.npy', 'wb') as f:
+    np.save(f, history.history['loss'])
+    np.save(f, history.history['sign_metric'])
+  return name
+
+def load_model_data(name):
+  if not os.path.exists('models/' + name):
+    print(f'{name} does not exist')
+    return
+  history = {}
+  with open(f'models/{name}/history.npy', 'rb') as f:
+    history['loss'] = np.load(f)
+    history['sign_metric'] = np.load(f)
+  return history
+
+def plot_history(name, title, repetitions, histories):
   fig, ax1 = plt.subplots()
-  fig.suptitle(f'{n_qbits}-qubit model simulated by {qbits_per_small}-qubit models')
+  #plt.figure(figsize=(10,6))
+  fig.suptitle(title)
   ax1.set_xlabel('Epoch')
-  ax1.set_ylabel('MSE loss (solid)')
-  ax1.set_yscale('log')
+  ax1.set_ylabel('MSE loss')
+  #ax1.set_yscale('log')
   ax_twin = ax1.twinx()
-  ax_twin.set_ylabel('Accuracy (dashed)')
+  ax_twin.set_ylabel('Accuracy')
   ax_twin.set_ylim((0, 1.05))
-  # make sure all circuits learn the same data
-  seed = tf.keras.random.randint((), 0, 38746, seed=seed)
   lines = []
-  for i, reps in enumerate(repetitions_set):
+  for i, history in enumerate(histories):
     # each smaller ciruit (set of inputs) gets reps different versions
-    _, _, history = recreate_circuit(n_qbits, n_layers, qbits_per_small, reps, epochs, batchsize, int(seed), scale_inputs)
     c = 'C' + str(i)
-    lines += ax1.plot(history.history['loss'], label=str(reps) + ' repetitions', color=c)
-    ax_twin.plot(history.history['parity_metric'], color=c, linestyle='--')
-  plt.legend(handles=lines, loc='lower left')
+    lines += ax1.plot(history['loss'], label=str(repetitions[i]) + ' repetitions MSE', color=c)
+    lines += ax_twin.plot(history['sign_metric'], label=str(repetitions[i]) + ' repetitions Accuracy', color=c, linestyle='--')
+  plt.legend(handles=lines, loc='upper right', fontsize='x-small')
   if not os.path.exists('results'):
     os.makedirs('results')
   plt.savefig(f'results/{name}.png')
 
+def plot_performances(name=None, n_qbits=2, qbits_per_small=1, n_layers=1, repetitions_set=[4],
+                      batchsize=100, epochs=100, scale_inputs=False, seed=None):
+  if name is None:
+    name = f'{n_qbits}q_by_{qbits_per_small}q'
+  # make sure all circuits learn the same data
+  seed = tf.keras.random.randint((), 0, 38746, seed=seed)
+  histories = []
+  for rep in repetitions_set:
+    save_at = f'{name}/repetition_{rep}'
+    if not os.path.exists('models/' + save_at):
+      save_at = train_and_save(name=save_at, n_qbits=n_qbits, qbits_per_small=qbits_per_small, n_layers=n_layers, repetition=rep,
+                        batchsize=batchsize, epochs=epochs, scale_inputs=scale_inputs, seed=seed)
+    histories.append(load_model_data(save_at))
+  title = f'{n_qbits}-qubit model simulated by {qbits_per_small}-qubit models'
+  plot_history(name, title, repetitions_set, histories)
+
 if __name__ == "__main__":
-  plot_performances(repetitions_set=[4, 8, 16, 32], n_qbits=3, n_layers=1, qbits_per_small=1, batchsize=50, epochs=100, seed=5562)
+  plot_performances(repetitions_set=[4, 8, 16, 32], n_qbits=3, n_layers=1, qbits_per_small=1, batchsize=50, epochs=10, seed=5562)
